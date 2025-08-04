@@ -1,40 +1,64 @@
 // server.js
 const express = require('express');
-const axios = require('axios');
 const cors = require('cors');
+const fetch = require('node-fetch');
 const bodyParser = require('body-parser');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
-const port = 3000;
 
-const appId = process.env.WECHAT_APP_ID;
-const appSecret = process.env.WECHAT_APP_SECRET;
+const APPID  = process.env.WECHAT_APP_ID;
+const SECRET  = process.env.WECHAT_APP_SECRET;
 
 app.use(cors());
 app.use(bodyParser.json());
 
-app.post('/getOpenId', async (req, res) => {
-  const { code } = req.body;
 
-  if (!code) {
-    return res.status(400).json({ error: 'Missing code' });
+function decryptData(sessionKey, encryptedData, iv) {
+  const _sessionKey = Buffer.from(sessionKey, 'base64');
+  const _encryptedData = Buffer.from(encryptedData, 'base64');
+  const _iv = Buffer.from(iv, 'base64');
+
+  try {
+    const decipher = crypto.createDecipheriv('aes-128-cbc', _sessionKey, _iv);
+    decipher.setAutoPadding(true);
+    let decoded = decipher.update(_encryptedData, 'binary', 'utf8');
+    decoded += decipher.final('utf8');
+    return JSON.parse(decoded);
+  } catch (err) {
+    console.error('Decryption failed:', err);
+    return null;
+  }
+}
+
+app.post('/wechat-login', async (req, res) => {
+  const { code, encryptedData, iv } = req.body;
+
+  if (!code || !encryptedData || !iv) {
+    return res.status(400).json({ error: 'Missing required fields' });
   }
 
   try {
-    const wechatResponse = await axios.get('https://api.weixin.qq.com/sns/jscode2session', {
-      params: {
-        appid: appId,
-        secret: appSecret,
-        js_code: code,
-        grant_type: 'authorization_code',
-      }
-    });
+    const wxAPI = `https://api.weixin.qq.com/sns/jscode2session?appid=${APPID}&secret=${SECRET}&js_code=${code}&grant_type=authorization_code`;
+    const response = await fetch(wxAPI);
+    const data = await response.json();
 
-    res.json(wechatResponse.data); // openid, session_key, etc.
-  } catch (error) {
-    console.error('Error fetching openid:', error.message);
-    res.status(500).json({ error: 'Failed to fetch openid' });
+    if (data.errcode) {
+      return res.status(500).json({ error: data.errmsg });
+    }
+
+    const sessionKey = data.session_key;
+    const decryptedUserInfo = decryptData(sessionKey, encryptedData, iv);
+
+    if (!decryptedUserInfo) {
+      return res.status(500).json({ error: 'Failed to decrypt data' });
+    }
+
+    res.json(decryptedUserInfo);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
@@ -47,6 +71,6 @@ app.get('/info', (req, res) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+app.listen(3000, () => {
+  console.log('Server running on http://localhost:3000');
 });
