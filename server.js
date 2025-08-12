@@ -50,12 +50,16 @@ app.post('/wechat-login', async (req, res) => {
 
     const sessionKey = data.session_key;
     const decryptedUserInfo = decryptData(sessionKey, encryptedData, iv);
+    const openid = data.openid;
 
     if (!decryptedUserInfo) {
       return res.status(500).json({ error: 'Failed to decrypt data' });
     }
 
-    res.json(decryptedUserInfo);
+       res.json({
+      openid,
+      ...decryptedUserInfo
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Internal Server Error' });
